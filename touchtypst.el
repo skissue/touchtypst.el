@@ -298,8 +298,7 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
     (unless (treesit-language-available-p 'typst)
       (touchtypst-mode -1)
       (user-error "TouchTypst requires the Typst Tree-sitter grammar"))
-    (unless (treesit-parser-list nil 'typst)
-      (treesit-parser-create 'typst))))
+    (treesit-parser-create 'typst)))
 
 (provide 'touchtypst)
 

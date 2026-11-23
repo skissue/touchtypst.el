@@ -14,20 +14,27 @@
 (defmacro touchtypst-tests--with-buffer (initial &rest body)
   "Run BODY in a synthetic Typst buffer with INITIAL contents.
 A literal `|' in INITIAL marks where point should be placed (and is
-removed).  Registers a typst tree-sitter parser and pretends the minor
-mode is active without invoking the major mode."
+removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
   (declare (indent 1) (debug (stringp body)))
   `(with-temp-buffer
      (insert ,initial)
      (goto-char (point-min))
      (when (search-forward "|" nil t) (delete-char -1))
-     (treesit-parser-create 'typst)
-     (setq-local touchtypst-mode t)
+     (touchtypst-mode 1)
      ,@body))
 
 (defun touchtypst-tests--char-after-string ()
   "Return the character after point as a string, or nil at end of buffer."
   (and (char-after) (string (char-after))))
+
+;;;; Mode activation ----------------------------------------------------------
+
+(ert-deftest touchtypst-test-mode-reuses-existing-parser ()
+  (with-temp-buffer
+    (let ((parser (treesit-parser-create 'typst)))
+      (touchtypst-mode 1)
+      (should touchtypst-mode)
+      (should (equal (treesit-parser-list) (list parser))))))
 
 ;;;; Context ------------------------------------------------------------------
 
