@@ -12,6 +12,15 @@
 
 ;;;; Math context
 
+(defun touchtypst--parser ()
+  "Return the buffer's existing Typst parser, or nil."
+  (cl-find 'typst (treesit-parser-list) :key #'treesit-parser-language))
+
+(defun touchtypst--node-at (pos)
+  "Return the Typst leaf at POS, or nil if there is no Typst parser."
+  (when-let* ((parser (touchtypst--parser)))
+    (treesit-node-at pos parser)))
+
 (defun touchtypst--node-ancestor (node type)
   "Return nearest ancestor (or NODE itself) whose type is TYPE, else nil."
   (let ((n node))
@@ -31,13 +40,44 @@ is at the start of the math node but typing there would insert outside it."
   "Return the enclosing `math' node at POS (or point), or nil.
 Returns nil at the exact opening or closing `$' boundary."
   (let* ((p (or pos (point)))
-         (node (treesit-node-at p))
+         (node (touchtypst--node-at p))
          (math (touchtypst--node-ancestor node "math")))
     (and (touchtypst--strictly-inside-p math p) math)))
 
 (defun touchtypst-in-math-p (&optional pos)
   "Return non-nil if POS (or point) is inside a `math' node (strictly)."
   (touchtypst-math-block pos))
+
+(defun touchtypst--literal-node-at-p (node pos)
+  "Return non-nil if inserting at POS is inside literal NODE."
+  (pcase (treesit-node-type node)
+    ((or "raw_span" "raw_blck" "string")
+     (touchtypst--strictly-inside-p node pos))
+    ("comment"
+     (or (touchtypst--strictly-inside-p node pos)
+         ;; A line comment also covers insertion at its end.
+         (and (= pos (treesit-node-end node))
+              (eq (char-after (1+ (treesit-node-start node))) ?/))))))
+
+(defun touchtypst-math-input-p (&optional pos)
+  "Return non-nil if insertion at POS (or point) is in Typst math syntax."
+  (let ((pos (or pos (point))))
+    (when-let* (((> pos (point-min)))
+                ;; Inspect the token to the left: point may be at its end.
+                (left (touchtypst--node-at (1- pos))))
+      (cl-loop for node = left then (treesit-node-parent node)
+               while node
+               ;; The closest enclosing syntax wins, including a nested equation.
+               when (and (equal (treesit-node-type node) "math")
+                         (touchtypst--strictly-inside-p node pos))
+               return t
+               when (or (touchtypst--literal-node-at-p node pos)
+                        (and (equal (treesit-node-type node) "code")
+                             (or (touchtypst--strictly-inside-p node pos)
+                                 ;; Typing here can extend the code identifier.
+                                 (and (= pos (treesit-node-end node))
+                                      (equal (treesit-node-type left) "ident")))))
+               return nil))))
 
 (defun touchtypst--math-exit-position (math)
   "Return the position after MATH's closer if point can exit there."
@@ -70,18 +110,10 @@ Returns nil at the exact opening or closing `$' boundary."
   (or (save-excursion
         (cl-oddp (skip-chars-backward "\\\\")))
       (let ((pos (point)))
-        (cl-loop for node = (and (> pos (point-min)) (treesit-node-at (1- pos)))
+        (cl-loop for node = (and (> pos (point-min)) (touchtypst--node-at (1- pos)))
                  then (treesit-node-parent node)
                  while node
-                 thereis
-                 (pcase (treesit-node-type node)
-                   ((or "raw_span" "raw_blck" "string")
-                    (touchtypst--strictly-inside-p node pos))
-                   ("comment"
-                    (or (touchtypst--strictly-inside-p node pos)
-                        ;; A line comment also covers insertion at its end.
-                        (and (= pos (treesit-node-end node))
-                             (eq (char-after (1+ (treesit-node-start node))) ?/)))))))))
+                 thereis (touchtypst--literal-node-at-p node pos)))))
 
 (defun touchtypst--call-callee-text (call-node)
   "Return text of CALL-NODE's callee child, or nil."
@@ -89,10 +121,10 @@ Returns nil at the exact opening or closing `$' boundary."
     (treesit-node-text first t)))
 
 (defun touchtypst-in-mat-row-p (&optional pos)
-  "Return non-nil if POS (or point) is inside a `mat(...)' argument list."
-  (let ((node (treesit-node-at (or pos (point))))
+  "Return non-nil if POS (or point) is in a `mat(...)' of this equation."
+  (let ((node (touchtypst--node-at (or pos (point))))
         (found nil))
-    (while (and node (not found))
+    (while (and node (not found) (not (equal (treesit-node-type node) "math")))
       (when (and (member (treesit-node-type node) '("call" "apply"))
                  (equal (touchtypst--call-callee-text node) "mat"))
         (setq found t))
@@ -105,7 +137,7 @@ Walks up from leaf so that anonymous tokens like `)' resolve to their parent.
 Returns nil if no such node exists."
   (let ((p (or pos (point))))
     (when (> p (point-min))
-      (let* ((leaf (treesit-node-at (1- p)))
+      (let* ((leaf (touchtypst--node-at (1- p)))
              (node leaf))
         ;; If leaf is anonymous (e.g. ')'), prefer parent.
         (while (and node
@@ -123,7 +155,8 @@ Returns nil if no such node exists."
 
 (defun touchtypst--refresh-parse ()
   "Force pending edits to be parsed before looking up new tab stops."
-  (treesit-parser-root-node (car (treesit-parser-list))))
+  (when-let* ((parser (touchtypst--parser)))
+    (treesit-parser-root-node parser)))
 
 ;;;; Tab stops
 

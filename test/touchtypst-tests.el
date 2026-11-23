@@ -38,6 +38,15 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
 
 ;;;; Context ------------------------------------------------------------------
 
+(ert-deftest touchtypst-test-math-input-without-parser ()
+  (with-temp-buffer
+    (insert "$x$")
+    (backward-char)
+    (should-not (touchtypst-math-input-p))
+    (should-not (touchtypst-math-block))
+    (should-not (touchtypst-previous-node))
+    (should-not (treesit-parser-list))))
+
 (ert-deftest touchtypst-test-in-math-inside ()
   (touchtypst-tests--with-buffer "Hello $x + |y$ world"
     (should (touchtypst-in-math-p))))
@@ -308,6 +317,72 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
 ;;;; End-to-end: snippet + nested smart-_ + tab navigation --------------------
 
 (defvar touchtypst-tests--tab-mode nil)
+
+(ert-deftest touchtypst-test-math-keys-with-foreign-parser-first ()
+  (skip-unless (treesit-language-available-p 'json))
+  (dolist (case '(("$x|$" "; b" "$bar(x)$" 8)
+                  ("$mat(a|, b)$" "; b" "$mat(a;b, b)$" 9)
+                  ("$fr|$" "TAB" "$frac(, )$" 7)
+                  ("$frac(|a, b)$" "TAB" "$frac(a, b)$" 10)
+                  ("$frac(a, |b)$" "S-<tab>" "$frac(a, b)$" 7)
+                  ("$x|$" "$" "$x$" 4)
+                  ("$\"x|\"$" "$" "$\"x$\"$" 5)
+                  ("$|$" "SPC" "$  $" 3)))
+    (pcase-let ((`(,initial ,keys ,expected ,position) case))
+      (ert-info ((format "%s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (treesit-parser-create 'json)
+            (should (eq (treesit-parser-language (car (treesit-parser-list))) 'json))
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (should (equal (buffer-string) expected))
+            (should (= (point) position))))))))
+
+(ert-deftest touchtypst-test-math-input-falls-through-in-literal-and-code-contexts ()
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '("_" "^" "`" ";" "TAB" "<backtab>"))
+      (define-key map (kbd key) (lambda () (interactive) (insert "!"))))
+    ;; Bracket the literal/code cases with math stops to exercise navigation too.
+    (dolist (initial '("$frac(a, \"fr|\", b)$"
+                       "$frac(a, /* fr| */ b)$"
+                       "$frac(a, // fr|\n b)$"
+                       "$frac(a, #`fr|`, b)$"
+                       "$frac(a, #```\nfr|\n```, b)$"
+                       "$frac(a, #foo(fr|, zz), b)$"
+                       "$frac(a, #fr|, b)$"
+                       "$frac(a, #[inner fr| text], b)$"
+                       "$frac(a, #[inner $x$| text], b)$"
+                       "plain fr|"))
+      (dolist (case '(("_" "!") ("^" "!") ("` a" "!a") ("; b" "!b")
+                      ("<tab>" "!") ("S-<tab>" "!")))
+        (pcase-let ((`(,keys ,inserted) case))
+          (ert-info ((format "%s in %S" keys initial))
+            (save-window-excursion
+              (touchtypst-tests--with-buffer initial
+                (switch-to-buffer (current-buffer))
+                (use-local-map map)
+                (execute-kbd-macro (kbd keys))
+                (should (equal (buffer-string)
+                               (string-replace "|" inserted initial)))))))))))
+
+(ert-deftest touchtypst-test-math-input-key-boundaries ()
+  (dolist (case '(("$#foo|bar$" "_" "$#foo_bar$")
+                  ("$\"fr|\"$" "TAB" "$\"fr\t\"$")
+                  ("$\"fr\"|$" "_" "$\"fr\"_()$")
+                  ("$|\"fr\"$" "_" "$_()\"fr\"$")
+                  ("$#foo(x)|$" "^" "$#foo(x)^()$")
+                  ("$ x // fr\n|$" "^" "$ x // fr\n^()$")
+                  ("$#[inner $x|$ text]$" "_" "$#[inner $x_()$ text]$")
+                  ("$#[inner $fr|$ text]$" "TAB" "$#[inner $frac(, )$ text]$")
+                  ("$#mat([inner $x|$ text])$" "; b" "$#mat([inner $bar(x)$ text])$")))
+    (pcase-let ((`(,initial ,keys ,expected) case))
+      (ert-info ((format "%s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (should (equal (buffer-string) expected))))))))
 
 (ert-deftest touchtypst-test-tab-falls-through-to-active-keymaps ()
   (let ((minor-map (make-sparse-keymap))

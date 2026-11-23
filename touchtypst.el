@@ -34,7 +34,8 @@
 ;;
 ;;   (add-hook 'typst-ts-mode-hook #'touchtypst-mode)
 ;;
-;; Triggers (only active inside `$...$'):
+;; Formula input and tab stops are inactive in literal text and embedded
+;; code.  Dollar and space handle equation delimiters separately.
 ;;
 ;;   ` <c>     symbol entry        e.g. `a -> alpha
 ;;   ; <c>     wrap previous node  e.g. ;b on x  -> bar(x)
@@ -87,9 +88,10 @@ Triggered by typing the word and pressing TAB while in math context."
         (list beg end template)))))
 
 (defun touchtypst-try-expand-snippet ()
-  "If the word before point is a snippet trigger, expand it.
+  "If the word before point is a math snippet trigger, expand it.
 Returns t on success, nil otherwise."
-  (when-let* ((info (touchtypst--snippet-before-point)))
+  (when-let* ((info (touchtypst--snippet-before-point))
+              ((touchtypst-math-input-p)))
     (delete-region (nth 0 info) (nth 1 info))
     (insert (nth 2 info))
     ;; Start the search at the beginning of the inserted text.
@@ -133,7 +135,7 @@ Returns t on success, nil otherwise."
 (defun touchtypst-symbol-dispatch ()
   "Read the next character; if it maps to a symbol in math, insert it."
   (interactive)
-  (if (not (touchtypst-in-math-p))
+  (if (not (touchtypst-math-input-p))
       (insert ?`)
     (let* ((ch (read-char "Symbol `"))
            (sym (alist-get ch touchtypst-symbol-alist)))
@@ -176,7 +178,7 @@ Point ends up after the closing paren."
 Falls through to literal `;' insertion outside math or inside `mat(...)'."
   (interactive)
   (cond
-   ((not (touchtypst-in-math-p))
+   ((not (touchtypst-math-input-p))
     (insert ?\;))
    ((touchtypst-in-mat-row-p)
     (insert ?\;))
@@ -202,14 +204,14 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 (defun touchtypst-smart-_ ()
   "Insert `_()' in math with point inside; bare `_' otherwise."
   (interactive)
-  (if (touchtypst-in-math-p)
+  (if (touchtypst-math-input-p)
       (progn (insert "_()") (backward-char 1))
     (insert ?_)))
 
 (defun touchtypst-smart-^ ()
   "Insert `^()' in math with point inside; bare `^' otherwise."
   (interactive)
-  (if (touchtypst-in-math-p)
+  (if (touchtypst-math-input-p)
       (progn (insert "^()") (backward-char 1))
     (insert ?^)))
 
@@ -240,13 +242,20 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 (defun touchtypst-tab-or-expand ()
   "Expand a snippet or jump to the next stop in math."
   (interactive)
-  (when (touchtypst-in-math-p)
-    (or (touchtypst-try-expand-snippet) (touchtypst-next-stop))))
+  (or (touchtypst-try-expand-snippet)
+      (when (touchtypst-math-input-p)
+        (touchtypst-next-stop))))
 
 (defun touchtypst-shift-tab-fallthrough ()
   "Jump to the previous stop in math."
   (interactive)
-  (touchtypst-prev-stop))
+  (when (touchtypst-math-input-p)
+    (touchtypst-prev-stop)))
+
+(defun touchtypst--math-input-filter (command)
+  "Return COMMAND when point is in formula syntax."
+  (when (touchtypst-math-input-p)
+    command))
 
 (defun touchtypst--dollar-filter (command)
   "Return COMMAND when dollar can open or exit an equation."
@@ -260,21 +269,25 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 
 (defun touchtypst--tab-filter (command)
   "Return COMMAND when Tab can expand a snippet or move to a stop."
-  (when (or (and (touchtypst-in-math-p) (touchtypst--snippet-before-point))
-            (touchtypst--next-stop-position))
+  (when (and (touchtypst-math-input-p)
+             (or (touchtypst--snippet-before-point) (touchtypst--next-stop-position)))
     command))
 
 (defun touchtypst--backtab-filter (command)
   "Return COMMAND when Shift-Tab can move to a previous stop."
-  (when (touchtypst--prev-stop-position)
+  (when (and (touchtypst-math-input-p) (touchtypst--prev-stop-position))
     command))
 
 (defvar touchtypst-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "`")          #'touchtypst-symbol-dispatch)
-    (define-key m (kbd ";")          #'touchtypst-modifier-dispatch)
-    (define-key m (kbd "_")          #'touchtypst-smart-_)
-    (define-key m (kbd "^")          #'touchtypst-smart-^)
+    (define-key m (kbd "`")
+                '(menu-item "" touchtypst-symbol-dispatch :filter touchtypst--math-input-filter))
+    (define-key m (kbd ";")
+                '(menu-item "" touchtypst-modifier-dispatch :filter touchtypst--math-input-filter))
+    (define-key m (kbd "_")
+                '(menu-item "" touchtypst-smart-_ :filter touchtypst--math-input-filter))
+    (define-key m (kbd "^")
+                '(menu-item "" touchtypst-smart-^ :filter touchtypst--math-input-filter))
     (define-key m (kbd "$")
                 '(menu-item "" touchtypst-smart-$ :filter touchtypst--dollar-filter))
     (define-key m (kbd "SPC")
