@@ -278,26 +278,70 @@ mode is active without invoking the major mode."
 
 ;;;; End-to-end: snippet + nested smart-_ + tab navigation --------------------
 
+(defvar touchtypst-tests--tab-mode nil)
+
+(ert-deftest touchtypst-test-tab-falls-through-to-active-keymaps ()
+  (let ((minor-map (make-sparse-keymap))
+        (local-map (make-sparse-keymap))
+        (user-map (make-sparse-keymap))
+        (original-global-map (current-global-map)))
+    (define-key minor-map (kbd "<tab>") (lambda () (interactive) (insert "minor")))
+    (define-key local-map (kbd "TAB") (lambda () (interactive) (insert "local")))
+    (dolist (key '("<backtab>" "S-TAB"))
+      (define-key user-map (kbd key) (lambda () (interactive) (insert "user"))))
+    (set-keymap-parent user-map original-global-map)
+    (unwind-protect
+        (progn
+          (use-global-map user-map)
+          (dolist (case '(("fr|" "<tab>" nil "frlocal")
+                          ("$x|$" "TAB" nil "$xlocal$")
+                          ("$ frac(a, |b) $" "<tab>" t "$ frac(a, minorb) $")
+                          ("$ frac(|a, b) $" "<backtab>" nil "$ frac(usera, b) $")
+                          ("$ frac(a, |b) $" "S-TAB" nil "$ frac(a, userb) $")))
+            (pcase-let ((`(,initial ,key ,minor-active ,expected) case))
+              (ert-info ((format "%s in %S" key initial))
+                (save-window-excursion
+                  (touchtypst-tests--with-buffer initial
+                    (switch-to-buffer (current-buffer))
+                    (use-local-map local-map)
+                    (let ((touchtypst-tests--tab-mode minor-active)
+                          (minor-mode-map-alist
+                           (append minor-mode-map-alist
+                                   (list (cons 'touchtypst-tests--tab-mode minor-map)))))
+                      (execute-kbd-macro (kbd key))
+                      (should (equal (buffer-string) expected)))))))))
+      (use-global-map original-global-map))))
+
+(ert-deftest touchtypst-test-tab-respects-higher-priority-binding ()
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "TAB") (lambda () (interactive) (insert "!")))
+    (dolist (key '("TAB" "<tab>"))
+      (save-window-excursion
+        (touchtypst-tests--with-buffer "$fr|$"
+          (switch-to-buffer (current-buffer))
+          (let ((touchtypst-tests--tab-mode t)
+                (minor-mode-map-alist
+                 (cons (cons 'touchtypst-tests--tab-mode map) minor-mode-map-alist)))
+            (execute-kbd-macro (kbd key))
+            (should (equal (buffer-string) "$fr!$"))))))))
+
 (ert-deftest touchtypst-test-e2e-snippet-then-nested-script ()
   "Expand fr -> frac(, ); type x in slot 1; smart-_; type n; TAB -> slot 2."
-  (touchtypst-tests--with-buffer "$ fr|$"
-    ;; Expand snippet -- lands at first empty slot.
-    (touchtypst-try-expand-snippet)
-    (should (string-match-p "frac(, )" (buffer-string)))
-    ;; Type `x' in the first slot.
-    (insert "x")
-    (should (string-match-p "frac(x, )" (buffer-string)))
-    ;; Smart subscript -- inserts _() at point.
-    (touchtypst-smart-_)
-    (should (string-match-p "frac(x_(), )" (buffer-string)))
-    ;; Type `n' inside the empty subscript group.
-    (insert "n")
-    (should (string-match-p "frac(x_(n), )" (buffer-string)))
-    ;; TAB now: next stop forward is the second frac slot (after the comma).
-    (should (touchtypst-next-stop))
-    ;; Cursor should land at the second slot of frac.  It's empty -> char-after
-    ;; is the trailing space before `)'.
-    (should (eq (char-after) ?\s))))
+  (save-window-excursion
+    (touchtypst-tests--with-buffer "$ fr|$"
+      (switch-to-buffer (current-buffer))
+      (execute-kbd-macro (kbd "<tab>"))
+      (should (equal (buffer-string) "$ frac(, )$"))
+      (should (eq (char-after) ?,))
+      (execute-kbd-macro (kbd "x _ n"))
+      (should (equal (buffer-string) "$ frac(x_(n), )$"))
+      ;; The next stop is the empty second frac slot just after `,'.
+      (execute-kbd-macro (kbd "TAB"))
+      (should (eq (char-before) ?,))
+      (should (eq (char-after) ?\s))
+      ;; The previous stop is the nested subscript slot, not the first frac slot.
+      (execute-kbd-macro (kbd "S-<tab>"))
+      (should (eq (char-after) ?n)))))
 
 (provide 'touchtypst-tests)
 ;;; touchtypst-tests.el ends here

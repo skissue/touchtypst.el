@@ -138,19 +138,25 @@ HAS-CALLEE means the first child is the callee (skip it)."
   (when-let* ((block (touchtypst-math-block)))
     (touchtypst--collect-stops block)))
 
+(defun touchtypst--next-stop-position ()
+  "Return the first math stop strictly after point, or nil."
+  (seq-find (lambda (p) (> p (point))) (touchtypst--stops-in-block)))
+
+(defun touchtypst--prev-stop-position ()
+  "Return the last math stop strictly before point, or nil."
+  (car (last (seq-filter (lambda (p) (< p (point))) (touchtypst--stops-in-block)))))
+
 (defun touchtypst-next-stop ()
   "Move point to the next tab stop in the current math block.
 Returns t if a stop was found, nil otherwise (caller should fall through)."
   (interactive)
-  (let* ((stops (touchtypst--stops-in-block))
-         (next (seq-find (lambda (p) (> p (point))) stops)))
+  (let ((next (touchtypst--next-stop-position)))
     (when next (goto-char next) t)))
 
 (defun touchtypst-prev-stop ()
   "Move point to the previous tab stop in the current math block."
   (interactive)
-  (let* ((stops (touchtypst--stops-in-block))
-         (prev (car (last (seq-filter (lambda (p) (< p (point))) stops)))))
+  (let ((prev (touchtypst--prev-stop-position)))
     (when prev (goto-char prev) t)))
 
 (provide 'touchtypst-parse)

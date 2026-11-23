@@ -42,7 +42,7 @@
 ;;   $        enter/leave math    inserts `$$' or steps over the closing `$'
 ;;   SPC      between `$|$'       expands to `$ | $' (display math)
 ;;   TAB      next tab stop       jumps to next slot in current math block
-;;   S-TAB    previous tab stop
+;;   Shift-Tab    previous tab stop
 ;;   <word> + TAB  expand snippet (if word matches a trigger)
 
 ;;; Code:
@@ -75,22 +75,23 @@ Triggered by typing the word and pressing TAB while in math context."
   :type '(alist :key-type string :value-type string)
   :group 'touchtypst)
 
-(defun touchtypst--word-before-point ()
-  "Return (BEG END WORD) for the alpha word ending at point, or nil."
+(defun touchtypst--snippet-before-point ()
+  "Return (BEG END TEMPLATE) for a snippet trigger ending at point, or nil."
   (save-excursion
     (let ((end (point)))
       (skip-chars-backward "a-zA-Z")
-      (let ((beg (point)))
-        (when (< beg end)
-          (list beg end (buffer-substring-no-properties beg end)))))))
+      (when-let* ((beg (point))
+                  ((< beg end))
+                  (word (buffer-substring-no-properties beg end))
+                  (template (cdr (assoc word touchtypst-snippet-alist))))
+        (list beg end template)))))
 
 (defun touchtypst-try-expand-snippet ()
   "If the word before point is a snippet trigger, expand it.
 Returns t on success, nil otherwise."
-  (when-let* ((info (touchtypst--word-before-point))
-              (template (cdr (assoc (nth 2 info) touchtypst-snippet-alist))))
+  (when-let* ((info (touchtypst--snippet-before-point)))
     (delete-region (nth 0 info) (nth 1 info))
-    (insert template)
+    (insert (nth 2 info))
     ;; Start the search at the beginning of the inserted text.
     (goto-char (nth 0 info))
     (touchtypst--refresh-parse)
@@ -240,18 +241,26 @@ Otherwise insert a normal space."
 ;;;; Minor mode and keymap
 
 (defun touchtypst-tab-or-expand ()
-  "TAB: try snippet expansion in math; else jump to next stop; else indent."
+  "Expand a snippet or jump to the next stop in math."
   (interactive)
-  (cond
-   ((and (touchtypst-in-math-p) (touchtypst-try-expand-snippet)))
-   ((and (touchtypst-in-math-p) (touchtypst-next-stop)))
-   (t (call-interactively #'indent-for-tab-command))))
+  (when (touchtypst-in-math-p)
+    (or (touchtypst-try-expand-snippet) (touchtypst-next-stop))))
 
 (defun touchtypst-shift-tab-fallthrough ()
-  "S-TAB: jump to previous stop in math; else no-op."
+  "Jump to the previous stop in math."
   (interactive)
-  (unless (and (touchtypst-in-math-p) (touchtypst-prev-stop))
-    (ignore)))
+  (touchtypst-prev-stop))
+
+(defun touchtypst--tab-filter (command)
+  "Return COMMAND when Tab can expand a snippet or move to a stop."
+  (when (or (and (touchtypst-in-math-p) (touchtypst--snippet-before-point))
+            (touchtypst--next-stop-position))
+    command))
+
+(defun touchtypst--backtab-filter (command)
+  "Return COMMAND when Shift-Tab can move to a previous stop."
+  (when (touchtypst--prev-stop-position)
+    command))
 
 (defvar touchtypst-mode-map
   (let ((m (make-sparse-keymap)))
@@ -261,10 +270,12 @@ Otherwise insert a normal space."
     (define-key m (kbd "^")          #'touchtypst-smart-^)
     (define-key m (kbd "$")          #'touchtypst-smart-$)
     (define-key m (kbd "SPC")        #'touchtypst-smart-SPC)
-    (define-key m (kbd "TAB")        #'touchtypst-tab-or-expand)
-    (define-key m (kbd "<tab>")      #'touchtypst-tab-or-expand)
-    (define-key m (kbd "<backtab>")  #'touchtypst-shift-tab-fallthrough)
-    (define-key m (kbd "S-TAB")      #'touchtypst-shift-tab-fallthrough)
+    ;; Let Emacs translate <tab> to TAB and S-<tab> to <backtab> so that
+    ;; higher-priority bindings for the translated keys still win.
+    (define-key m (kbd "TAB")
+                '(menu-item "" touchtypst-tab-or-expand :filter touchtypst--tab-filter))
+    (define-key m (kbd "<backtab>")
+                '(menu-item "" touchtypst-shift-tab-fallthrough :filter touchtypst--backtab-filter))
     m)
   "Keymap for `touchtypst-mode'.")
 
