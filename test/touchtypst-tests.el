@@ -229,9 +229,24 @@ mode is active without invoking the major mode."
     (should (= (point) 2))))
 
 (ert-deftest touchtypst-test-smart-dollar-in-math-closes ()
-  (touchtypst-tests--with-buffer "$x|$"
+  (save-window-excursion
+    (touchtypst-tests--with-buffer "|"
+      (switch-to-buffer (current-buffer))
+      (execute-kbd-macro (kbd "$ x $"))
+      (should (string= "$x$" (buffer-string)))
+      (should (eobp)))))
+
+(ert-deftest touchtypst-test-smart-dollar-in-math-string ()
+  (touchtypst-tests--with-buffer "$\"a|$\"$"
     (touchtypst-smart-$)
-    (should (string= "$x$$" (buffer-string)))))
+    (should (string= "$\"a$$\"$" (buffer-string)))
+    (should (= (point) 5))))
+
+(ert-deftest touchtypst-test-smart-dollar-before-next-math-opener ()
+  (touchtypst-tests--with-buffer "$x$|$y$"
+    (touchtypst-smart-$)
+    (should (string= "$x$$$$y$" (buffer-string)))
+    (should (= (point) 5))))
 
 (ert-deftest touchtypst-test-smart-spc-between-dollars ()
   (touchtypst-tests--with-buffer "$|$"

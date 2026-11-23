@@ -39,7 +39,7 @@
 ;;   ` <c>     symbol entry        e.g. `a -> alpha
 ;;   ; <c>     wrap previous node  e.g. ;b on x  -> bar(x)
 ;;   _ / ^    smart subscript     inserts `_()` / `^()' with point inside
-;;   $        enter math          inserts `$$' with point inside
+;;   $        enter/leave math    inserts `$$' or steps over the closing `$'
 ;;   SPC      between `$|$'       expands to `$ | $' (display math)
 ;;   TAB      next tab stop       jumps to next slot in current math block
 ;;   S-TAB    previous tab stop
@@ -213,11 +213,16 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
     (insert ?^)))
 
 (defun touchtypst-smart-$ ()
-  "Insert `$$' and place point in the middle, entering math.
-If already in math, insert a single `$' (closing the block)."
+  "Insert `$$' with point inside, or step over the closing `$' of math.
+Elsewhere inside math, insert a single `$'."
   (interactive)
-  (if (touchtypst-in-math-p)
-      (insert ?$)
+  (if-let* ((math (touchtypst-math-block)))
+      (let ((closer (treesit-node-child math -1)))
+        (if (and closer
+                 (equal (treesit-node-type closer) "$")
+                 (= (treesit-node-start closer) (point)))
+            (goto-char (treesit-node-end closer))
+          (insert ?$)))
     (insert "$$")
     (backward-char 1)))
 
