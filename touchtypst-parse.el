@@ -39,6 +39,50 @@ Returns nil at the exact opening or closing `$' boundary."
   "Return non-nil if POS (or point) is inside a `math' node (strictly)."
   (touchtypst-math-block pos))
 
+(defun touchtypst--math-exit-position (math)
+  "Return the position after MATH's closer if point can exit there."
+  (let ((closer (treesit-node-child math -1)))
+    (when (and (equal (treesit-node-type closer) "$")
+               (not (treesit-node-check closer 'missing)))
+      (let ((end (treesit-node-start closer)))
+        (when (or (= (point) end)
+                  ;; Display equations have whitespace after the opener.
+                  (and (< (point) end)
+                       (memq (char-after (1+ (treesit-node-start math)))
+                             '(?\s ?\t ?\r ?\n))
+                       (save-excursion
+                         (skip-chars-forward " \t\r\n" end)
+                         (= (point) end))))
+          (treesit-node-end closer))))))
+
+(defun touchtypst--empty-math-p ()
+  "Return non-nil if point is between the delimiters of an empty equation."
+  (and (eq (char-before) ?$)
+       (eq (char-after) ?$)
+       (when-let* ((math (touchtypst-math-block)))
+         (and (= (treesit-node-start math) (1- (point)))
+              (= (treesit-node-end math) (1+ (point)))
+              (equal (treesit-node-type (treesit-node-child math 0)) "$")
+              (equal (treesit-node-type (treesit-node-child math -1)) "$")))))
+
+(defun touchtypst--literal-dollar-p ()
+  "Return non-nil if a dollar at point would be literal, not a math opener."
+  (or (save-excursion
+        (cl-oddp (skip-chars-backward "\\\\")))
+      (let ((pos (point)))
+        (cl-loop for node = (and (> pos (point-min)) (treesit-node-at (1- pos)))
+                 then (treesit-node-parent node)
+                 while node
+                 thereis
+                 (pcase (treesit-node-type node)
+                   ((or "raw_span" "raw_blck" "string")
+                    (touchtypst--strictly-inside-p node pos))
+                   ("comment"
+                    (or (touchtypst--strictly-inside-p node pos)
+                        ;; A line comment also covers insertion at its end.
+                        (and (= pos (treesit-node-end node))
+                             (eq (char-after (1+ (treesit-node-start node))) ?/)))))))))
+
 (defun touchtypst--call-callee-text (call-node)
   "Return text of CALL-NODE's callee child, or nil."
   (when-let* ((first (car (treesit-node-children call-node))))

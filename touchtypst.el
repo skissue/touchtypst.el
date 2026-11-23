@@ -213,28 +213,25 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
       (progn (insert "^()") (backward-char 1))
     (insert ?^)))
 
+(defun touchtypst--smart-dollar-action ()
+  "Return `open', an equation exit position, or nil for literal dollar."
+  (unless (touchtypst--literal-dollar-p)
+    (if-let* ((math (touchtypst-math-block)))
+        (touchtypst--math-exit-position math)
+      'open)))
+
 (defun touchtypst-smart-$ ()
-  "Insert `$$' with point inside, or step over the closing `$' of math.
-Elsewhere inside math, insert a single `$'."
+  "Pair or exit an equation, or insert a literal dollar otherwise."
   (interactive)
-  (if-let* ((math (touchtypst-math-block)))
-      (let ((closer (treesit-node-child math -1)))
-        (if (and closer
-                 (equal (treesit-node-type closer) "$")
-                 (= (treesit-node-start closer) (point)))
-            (goto-char (treesit-node-end closer))
-          (insert ?$)))
-    (insert "$$")
-    (backward-char 1)))
+  (let ((action (touchtypst--smart-dollar-action)))
+    (cond ((eq action 'open) (insert "$$") (backward-char 1))
+          (action (goto-char action))
+          (t (insert ?$)))))
 
 (defun touchtypst-smart-SPC ()
-  "If point is exactly between two `$', expand to `$ | $' (display math).
-Otherwise insert a normal space."
+  "Pad an empty equation to make it display math, or insert one space."
   (interactive)
-  (if (and (> (point) (point-min))
-           (< (point) (point-max))
-           (eq (char-before) ?$)
-           (eq (char-after)  ?$))
+  (if (touchtypst--empty-math-p)
       (progn (insert "  ") (backward-char 1))
     (insert ?\s)))
 
@@ -250,6 +247,16 @@ Otherwise insert a normal space."
   "Jump to the previous stop in math."
   (interactive)
   (touchtypst-prev-stop))
+
+(defun touchtypst--dollar-filter (command)
+  "Return COMMAND when dollar can open or exit an equation."
+  (when (touchtypst--smart-dollar-action)
+    command))
+
+(defun touchtypst--spc-filter (command)
+  "Return COMMAND when SPC can pad an empty equation."
+  (when (touchtypst--empty-math-p)
+    command))
 
 (defun touchtypst--tab-filter (command)
   "Return COMMAND when Tab can expand a snippet or move to a stop."
@@ -268,8 +275,10 @@ Otherwise insert a normal space."
     (define-key m (kbd ";")          #'touchtypst-modifier-dispatch)
     (define-key m (kbd "_")          #'touchtypst-smart-_)
     (define-key m (kbd "^")          #'touchtypst-smart-^)
-    (define-key m (kbd "$")          #'touchtypst-smart-$)
-    (define-key m (kbd "SPC")        #'touchtypst-smart-SPC)
+    (define-key m (kbd "$")
+                '(menu-item "" touchtypst-smart-$ :filter touchtypst--dollar-filter))
+    (define-key m (kbd "SPC")
+                '(menu-item "" touchtypst-smart-SPC :filter touchtypst--spc-filter))
     ;; Let Emacs translate <tab> to TAB and S-<tab> to <backtab> so that
     ;; higher-priority bindings for the translated keys still win.
     (define-key m (kbd "TAB")

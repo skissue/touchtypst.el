@@ -222,47 +222,69 @@ mode is active without invoking the major mode."
     (should (string= "$ x^()$" (buffer-string)))
     (should (eq (char-after) ?\)))))
 
-(ert-deftest touchtypst-test-smart-dollar-outside-math ()
-  (touchtypst-tests--with-buffer "|"
-    (touchtypst-smart-$)
-    (should (string= "$$" (buffer-string)))
-    (should (= (point) 2))))
+(ert-deftest touchtypst-test-equation-keys-with-default-bindings ()
+  (dolist (case '(("|" "$" "$$" 2)
+                  ("|" "$ x $" "$x$" 4)
+                  ("|" "$ SPC x $" "$ x $" 6)
+                  ("$ x| $" "$" "$ x $" 6)
+                  ("$ x|  $" "$" "$ x  $" 7)
+                  ("$\nx|\n$" "$" "$\nx\n$" 6)
+                  ("$ x // cost\n|$" "$" "$ x // cost\n$" 14)
+                  ("$ x \\\\| $" "$" "$ x \\\\ $" 9)
+                  ("$x$|$y$" "$" "$x$$$$y$" 5)
+                  ("$|$" "SPC" "$  $" 3)
+                  ("$x$|$y$" "SPC" "$x$ $y$" 5)
+                  ("plain|text" "C-u 3 SPC" "plain   text" 9)
+                  ("`raw|`" "$" "`raw$`" 6)
+                  ("`raw`|" "$" "`raw`$$" 7)
+                  ("\\\\|" "$" "\\\\$$" 4)))
+    (pcase-let ((`(,initial ,keys ,expected ,position) case))
+      (ert-info ((format "%s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (should (equal (buffer-string) expected))
+            (should (= (point) position))))))))
 
-(ert-deftest touchtypst-test-smart-dollar-in-math-closes ()
-  (save-window-excursion
-    (touchtypst-tests--with-buffer "|"
-      (switch-to-buffer (current-buffer))
-      (execute-kbd-macro (kbd "$ x $"))
-      (should (string= "$x$" (buffer-string)))
-      (should (eobp)))))
+(ert-deftest touchtypst-test-equation-keys-fall-through-to-active-keymap ()
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '("$" "SPC"))
+      (define-key map (kbd key) (lambda () (interactive) (insert "!"))))
+    (dolist (case '(("$x$|$y$" "SPC" "$x$!$y$")
+                    ("`$|$`" "SPC" "`$!$`")
+                    ("hello|world" "SPC" "hello!world")
+                    ("$ x|$" "SPC" "$ x!$")
+                    ("$ x |y $" "$" "$ x !y $")
+                    ("$x| $" "$" "$x! $")
+                    ("$ x // cost|\n$" "$" "$ x // cost!\n$")
+                    ("$ x \\| $" "$" "$ x \\! $")
+                    ("$\"a|$\"$" "$" "$\"a!$\"$")
+                    ("`raw|`" "$" "`raw!`")
+                    ("```\nraw|\n```" "$" "```\nraw!\n```")
+                    ("// note|" "$" "// note!")
+                    ("\\|" "$" "\\!")))
+      (pcase-let ((`(,initial ,key ,expected) case))
+        (ert-info ((format "%s in %S" key initial))
+          (save-window-excursion
+            (touchtypst-tests--with-buffer initial
+              (switch-to-buffer (current-buffer))
+              (use-local-map map)
+              (execute-kbd-macro (kbd key))
+              (should (equal (buffer-string) expected)))))))))
 
-(ert-deftest touchtypst-test-smart-dollar-in-math-string ()
-  (touchtypst-tests--with-buffer "$\"a|$\"$"
-    (touchtypst-smart-$)
-    (should (string= "$\"a$$\"$" (buffer-string)))
-    (should (= (point) 5))))
-
-(ert-deftest touchtypst-test-smart-dollar-before-next-math-opener ()
-  (touchtypst-tests--with-buffer "$x$|$y$"
-    (touchtypst-smart-$)
-    (should (string= "$x$$$$y$" (buffer-string)))
-    (should (= (point) 5))))
-
-(ert-deftest touchtypst-test-smart-spc-between-dollars ()
-  (touchtypst-tests--with-buffer "$|$"
-    (touchtypst-smart-SPC)
-    (should (string= "$  $" (buffer-string)))
-    (should (= (point) 3))))
-
-(ert-deftest touchtypst-test-smart-spc-not-between-dollars ()
-  (touchtypst-tests--with-buffer "$ x|$"
-    (touchtypst-smart-SPC)
-    (should (string= "$ x $" (buffer-string)))))
-
-(ert-deftest touchtypst-test-smart-spc-outside-anything ()
-  (touchtypst-tests--with-buffer "hello|world"
-    (touchtypst-smart-SPC)
-    (should (string= "hello world" (buffer-string)))))
+(ert-deftest touchtypst-test-equation-commands-insert-literal-when-called-directly ()
+  (dolist (case '(("plain|text" touchtypst-smart-SPC "plain text" 7)
+                  ("$x$|$y$" touchtypst-smart-SPC "$x$ $y$" 5)
+                  ("$\"a|$\"$" touchtypst-smart-$ "$\"a$$\"$" 5)
+                  ("$ x // cost|\n$" touchtypst-smart-$ "$ x // cost$\n$" 13)
+                  ("$ x \\| $" touchtypst-smart-$ "$ x \\$ $" 7)))
+    (pcase-let ((`(,initial ,command ,expected ,position) case))
+      (ert-info ((format "%s in %S" command initial))
+        (touchtypst-tests--with-buffer initial
+          (call-interactively command)
+          (should (equal (buffer-string) expected))
+          (should (= (point) position)))))))
 
 ;;;; Symbol dispatch (verified via table, not read-char) ----------------------
 
