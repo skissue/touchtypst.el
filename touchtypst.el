@@ -62,7 +62,7 @@
     ("rt"  . "root(, )")
     ("sm"  . "sum_()^()")
     ("pr"  . "product_()^()")
-    ("in"  . "integral_()^()")
+    ("int" . "integral_()^()")
     ("lm"  . "lim_()")
     ("mt"  . "mat(, ; , )")
     ("vc"  . "vec(, )")

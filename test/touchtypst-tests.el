@@ -372,5 +372,17 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
       (execute-kbd-macro (kbd "S-<tab>"))
       (should (eq (char-after) ?n)))))
 
+(ert-deftest touchtypst-test-e2e-integral-and-membership-tab ()
+  (dolist (case '(("$frac(|, y)$" "` i TAB" "$frac(in, y)$" 11)
+                  ("$|$" "i n t TAB" "$integral_()^()$" 12)))
+    (pcase-let ((`(,initial ,keys ,expected ,position) case))
+      (ert-info ((format "%s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (should (equal (buffer-string) expected))
+            (should (= (point) position))))))))
+
 (provide 'touchtypst-tests)
 ;;; touchtypst-tests.el ends here
