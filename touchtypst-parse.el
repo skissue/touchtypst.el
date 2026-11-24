@@ -143,15 +143,18 @@ Returns nil at the exact opening or closing `$' boundary."
     (treesit-node-text first t)))
 
 (defun touchtypst-in-mat-row-p (&optional pos)
-  "Return non-nil if POS (or point) is in a `mat(...)' of this equation."
-  (let ((node (touchtypst--node-at (or pos (point))))
-        (found nil))
-    (while (and node (not found) (not (equal (treesit-node-type node) "math")))
-      (when (and (member (treesit-node-type node) '("call" "apply"))
-                 (equal (touchtypst--call-callee-text node) "mat"))
-        (setq found t))
-      (setq node (treesit-node-parent node)))
-    found))
+  "Return non-nil if insertion at POS (or point) is between `mat' parentheses."
+  (let ((pos (or pos (point))))
+    (cl-loop for node = (touchtypst--node-at pos) then (treesit-node-parent node)
+             while (and node (not (equal (treesit-node-type node) "math")))
+             thereis
+             (when (and (member (treesit-node-type node) '("call" "apply"))
+                        (equal (touchtypst--call-callee-text node) "mat"))
+               (let ((open (treesit-node-child node 1))
+                     (close (treesit-node-child node -1)))
+                 (and (equal (treesit-node-text open t) "(")
+                      (equal (treesit-node-text close t) ")")
+                      (<= (treesit-node-end open) pos (treesit-node-start close))))))))
 
 (defun touchtypst-previous-node (&optional pos)
   "Return the smallest node ending exactly at POS (or point).

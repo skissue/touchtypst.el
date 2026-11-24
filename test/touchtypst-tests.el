@@ -281,6 +281,23 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
             (insert "|")
             (should (equal (buffer-string) expected))))))))
 
+(ert-deftest touchtypst-test-modifier-matrix-argument-boundaries ()
+  (dolist (case '(("$sqrt(x)|mat(1)$" "$bar(sqrt(x))|mat(1)$")
+                  ("$mat|(1)$" "$bar(mat)|(1)$")
+                  ("$mat(|1)$" "$mat(;b|1)$")
+                  ("$mat(1|)$" "$mat(1;b|)$")
+                  ("$mat(1)|$" "$bar(mat(1))|$")
+                  ("$mat(|)$" "$mat(;b|)$")
+                  ("$mat(1, 2|; 3, 4)$" "$mat(1, 2;b|; 3, 4)$")))
+    (pcase-let ((`(,initial ,expected) case))
+      (ert-info ((format ";b in %S" initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd "; b"))
+            (insert "|")
+            (should (equal (buffer-string) expected))))))))
+
 ;;;; Smart insertions ---------------------------------------------------------
 
 (ert-deftest touchtypst-test-smart-_-in-math ()
