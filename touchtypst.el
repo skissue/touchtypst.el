@@ -103,6 +103,23 @@ Returns t on success, nil otherwise."
 
 ;;;; Symbol and modifier chords
 
+(defun touchtypst--read-chord (prompt prefix alist)
+  "Read a key with PROMPT and return its mapping in ALIST.
+For an unmapped key, insert PREFIX and either insert the printable key
+or let the command loop handle it."
+  (let ((key (read-key prompt t)))
+    ;; `read-key' can return C-g as an event, e.g. in a keyboard macro.
+    (when (eq key ?\C-g)
+      (keyboard-quit))
+    (or (alist-get key alist)
+        (progn
+          (insert prefix)
+          (if (and (characterp key)
+                   (not (eq (get-char-code-property key 'general-category) 'Cc)))
+              (insert key)
+            (push (cons 'no-record key) unread-command-events))
+          nil))))
+
 (defcustom touchtypst-symbol-alist
   '((?a . "alpha")    (?A . "Alpha")
     (?b . "beta")     (?B . "Beta")
@@ -158,23 +175,20 @@ Returns t on success, nil otherwise."
       (eq kind 'start))))
 
 (defun touchtypst-symbol-dispatch ()
-  "Read the next character; if it maps to a symbol in math, insert it."
+  "Read the next key; if it maps to a symbol in math, insert it."
   (interactive)
   (if (not (touchtypst-math-input-p))
       (insert ?`)
-    (let* ((ch (read-char "Symbol `"))
-           (sym (alist-get ch touchtypst-symbol-alist)))
-      (if sym
-          (when (> (length sym) 0)
-            (when (and (touchtypst--math-identifier-char (aref sym 0))
-                       (touchtypst--math-identifier-before-p))
-              (insert " "))
-            (insert sym)
-            ;; Leave point before the separator so a suffix can still attach.
-            (when (and (touchtypst--math-identifier-char (char-after))
-                       (touchtypst--math-identifier-before-p))
-              (save-excursion (insert " "))))
-        (insert ?` ch)))))
+    (when-let* ((sym (touchtypst--read-chord "Symbol `" ?` touchtypst-symbol-alist))
+                ((> (length sym) 0)))
+      (when (and (touchtypst--math-identifier-char (aref sym 0))
+                 (touchtypst--math-identifier-before-p))
+        (insert " "))
+      (insert sym)
+      ;; Leave point before the separator so a suffix can still attach.
+      (when (and (touchtypst--math-identifier-char (char-after))
+                 (touchtypst--math-identifier-before-p))
+        (save-excursion (insert " "))))))
 
 (defcustom touchtypst-modifier-alist
   '((?b . "bar")
@@ -207,7 +221,7 @@ Point ends up after the closing paren."
   (goto-char (+ end (length fn-name) 2)))  ; "fn(" + ")"
 
 (defun touchtypst-modifier-dispatch ()
-  "Read next char; wrap previous node (or region) with the mapped function.
+  "Read next key; wrap previous node (or region) with the mapped function.
 Falls through to literal `;' insertion outside math or inside `mat(...)'."
   (interactive)
   (cond
@@ -216,11 +230,8 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
    ((touchtypst-in-mat-row-p)
     (insert ?\;))
    (t
-    (let* ((ch (read-char "Modifier ;"))
-           (fn (alist-get ch touchtypst-modifier-alist)))
+    (when-let* ((fn (touchtypst--read-chord "Modifier ;" ?\; touchtypst-modifier-alist)))
       (cond
-       ((null fn)
-        (insert ?\; ch))
        ((use-region-p)
         (touchtypst--wrap-region (region-beginning) (region-end) fn)
         (deactivate-mark))

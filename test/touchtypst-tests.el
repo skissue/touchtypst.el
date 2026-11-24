@@ -401,6 +401,29 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
   (should (equal "arrow" (alist-get ?v touchtypst-modifier-alist)))
   (should (equal "bold"  (alist-get ?B touchtypst-modifier-alist))))
 
+(ert-deftest touchtypst-test-chord-fallback-uses-active-keymaps ()
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '("RET" "q" "C-c x"))
+      (define-key map (kbd key) (lambda () (interactive) (insert "!"))))
+    (dolist (prefix '("`" ";"))
+      (dolist (case '(("RET" "$x%!|$") ("<left>" "$x|%$") ("q" "$x%q|$")
+                      ("é" "$x%é|$") ("C-c x" "$x%!|$") ("C-g" "$x|$")))
+        (pcase-let ((`(,suffix ,expected) case))
+          (ert-info ((format "%s %s" prefix suffix))
+            (save-window-excursion
+              (touchtypst-tests--with-buffer "$x|$"
+                (switch-to-buffer (current-buffer))
+                (use-local-map map)
+                (let ((keys (kbd (concat prefix " " suffix))))
+                  (if (equal suffix "C-g")
+                      (should (eq (condition-case nil
+                                    (execute-kbd-macro keys)
+                                  (quit 'quit))
+                                  'quit))
+                    (execute-kbd-macro keys)))
+                (insert "|")
+                (should (equal (buffer-string) (string-replace "%" prefix expected)))))))))))
+
 ;;;; End-to-end: snippet + nested smart-_ + tab navigation --------------------
 
 (defvar touchtypst-tests--tab-mode nil)
