@@ -77,22 +77,21 @@ Triggered by typing the word and pressing TAB while in math context."
   :group 'touchtypst)
 
 (defun touchtypst--snippet-before-point ()
-  "Return (BEG END TEMPLATE) for a snippet trigger ending at point, or nil."
-  (save-excursion
-    (let ((end (point)))
-      (skip-chars-backward "a-zA-Z")
-      (when-let* ((beg (point))
-                  ((< beg end))
-                  (word (buffer-substring-no-properties beg end))
-                  (template (cdr (assoc word touchtypst-snippet-alist))))
-        (list beg end template)))))
+  "Return (BEG END TEMPLATE) for a whole math trigger ending at point."
+  (when-let* ((node (touchtypst-previous-node))
+              ((member (treesit-node-type node) '("ident" "letter")))
+              ;; Field components and existing callees are not standalone triggers.
+              ((not (member (treesit-node-type (treesit-node-parent node))
+                            '("field" "call" "apply"))))
+              (template (cdr (assoc (treesit-node-text node t) touchtypst-snippet-alist)))
+              ((touchtypst-math-input-p)))
+    (list (treesit-node-start node) (treesit-node-end node) template)))
 
 (defun touchtypst-try-expand-snippet ()
   "If the word before point is a math snippet trigger, expand it.
 Move point to the first template slot, or leave it after the inserted text.
 Returns t on success, nil otherwise."
-  (when-let* ((info (touchtypst--snippet-before-point))
-              ((touchtypst-math-input-p)))
+  (when-let* ((info (touchtypst--snippet-before-point)))
     (pcase-let ((`(,beg ,end ,template) info))
       (delete-region beg end)
       (insert template)
@@ -303,8 +302,8 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 
 (defun touchtypst--tab-filter (command)
   "Return COMMAND when Tab can expand a snippet or move to a stop."
-  (when (and (touchtypst-math-input-p)
-             (or (touchtypst--snippet-before-point) (touchtypst--next-stop-position)))
+  (when (or (touchtypst--snippet-before-point)
+            (and (touchtypst-math-input-p) (touchtypst--next-stop-position)))
     command))
 
 (defun touchtypst--backtab-filter (command)
