@@ -302,7 +302,49 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
           (should (equal (buffer-string) expected))
           (should (= (point) position)))))))
 
-;;;; Symbol dispatch (verified via table, not read-char) ----------------------
+;;;; Symbol dispatch ---------------------------------------------------------
+
+(ert-deftest touchtypst-test-symbol-key-spacing ()
+  (dolist (case '(("$|$" "` a ` b" "$alpha beta|$")
+                  ("$alpha|gamma$" "` b" "$alpha beta| gamma$")
+                  ("$alpha2|$" "` b" "$alpha2 beta|$")
+                  ("$|2$" "` a" "$alpha| 2$")
+                  ("$α|β$" "` a" "$α alpha| β$")
+                  ("$|·$" "` a" "$alpha| ·$")
+                  ("$·|$" "` b" "$·beta|$")
+                  ("$x·|$" "` b" "$x· beta|$")
+                  ("$|‿$" "` a" "$alpha| ‿$")
+                  ("$‿|$" "` b" "$‿beta|$")
+                  ("$x‿|$" "` b" "$x‿ beta|$")
+                  ("$|beta$" "` e . a l t" "$epsilon.alt| beta$")
+                  ("$|.alt$" "` e" "$epsilon|.alt$")
+                  ("$|_i$" "` a" "$alpha|_i$")
+                  ("$12|$" "` a" "$12alpha|$")
+                  ("$alpha | beta$" "` g" "$alpha gamma| beta$")))
+    (pcase-let ((`(,initial ,keys ,expected) case))
+      (ert-info ((format "%s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (insert "|")
+            (should (equal (buffer-string) expected))))))))
+
+(ert-deftest touchtypst-test-symbol-key-spacing-custom-mappings ()
+  (dolist (case '(("+" "$x+|y$")
+                  ("+alpha" "$x+alpha| y$")
+                  ("alpha+" "$x alpha+|y$")
+                  ("2" "$x 2|y$")
+                  ("" "$x|y$")))
+    (pcase-let ((`(,mapping ,expected) case))
+      (ert-info ((format "Mapping to %S" mapping))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer "$x|y$"
+            (switch-to-buffer (current-buffer))
+            (let ((touchtypst-symbol-alist `((?q . ,mapping))))
+              (execute-kbd-macro (kbd "` q")))
+            (insert "|")
+            (should (equal (buffer-string) expected))))))))
 
 (ert-deftest touchtypst-test-symbol-table-greek ()
   (should (equal "alpha" (alist-get ?a touchtypst-symbol-alist)))

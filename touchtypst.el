@@ -132,6 +132,30 @@ Returns t on success, nil otherwise."
   :type '(alist :key-type character :value-type string)
   :group 'touchtypst)
 
+(defun touchtypst--math-identifier-char (char)
+  "Classify CHAR as `start', `continue', or nil in a math identifier."
+  ;; Approximate Typst's XID classes with Unicode categories and exceptions.
+  ;; Underscore is a script operator, even though it is connector punctuation.
+  (when (and char (not (eq char ?_)))
+    (let ((category (get-char-code-property char 'general-category)))
+      (cond
+       ((or (memq category '(Lu Ll Lt Lm Lo Nl))
+            (memq char '(#x1885 #x1886 #x2118 #x212e)))
+        'start)
+       ((or (memq category '(Mn Mc Nd Pc))
+            (memq char '(#xb7 #x387 #x19da #x200c #x200d #x30fb #xff65))
+            (<= #x1369 char #x1371))
+        'continue)))))
+
+(defun touchtypst--math-identifier-before-p ()
+  "Return non-nil if the identifier run before point contains a starter."
+  (save-excursion
+    (let (kind)
+      (while (eq (setq kind (touchtypst--math-identifier-char (char-before)))
+                 'continue)
+        (backward-char))
+      (eq kind 'start))))
+
 (defun touchtypst-symbol-dispatch ()
   "Read the next character; if it maps to a symbol in math, insert it."
   (interactive)
@@ -140,7 +164,15 @@ Returns t on success, nil otherwise."
     (let* ((ch (read-char "Symbol `"))
            (sym (alist-get ch touchtypst-symbol-alist)))
       (if sym
-          (insert sym)
+          (when (> (length sym) 0)
+            (when (and (touchtypst--math-identifier-char (aref sym 0))
+                       (touchtypst--math-identifier-before-p))
+              (insert " "))
+            (insert sym)
+            ;; Leave point before the separator so a suffix can still attach.
+            (when (and (touchtypst--math-identifier-char (char-after))
+                       (touchtypst--math-identifier-before-p))
+              (save-excursion (insert " "))))
         (insert ?` ch)))))
 
 (defcustom touchtypst-modifier-alist
