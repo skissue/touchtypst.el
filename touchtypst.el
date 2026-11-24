@@ -37,7 +37,9 @@
 ;; Formula input and tab stops are inactive in literal text and embedded
 ;; code.  Dollar and space handle equation delimiters separately.
 ;;
-;;   ` <c>     symbol entry        e.g. `a -> alpha
+;;   ` <c>     layer-one symbol    e.g. `a -> alpha, `Q -> QQ
+;;   `` <c>    layer-two symbol    e.g. ``N -> NN, ``Z -> ZZ, ``Q -> QQ,
+;;                                      ``R -> RR, ``C -> CC
 ;;   ; <c>     wrap previous node  e.g. ;b on x  -> bar(x)
 ;;   _ / ^    smart subscript     inserts `_()` / `^()' with point inside
 ;;   $        enter/leave math    inserts `$$' or steps over the closing `$'
@@ -45,6 +47,12 @@
 ;;   TAB      next tab stop       jumps to next slot in current math block
 ;;   Shift-Tab    previous tab stop
 ;;   <word> + TAB  expand snippet (if word matches a trigger)
+;;
+;; Type the backticks and symbol key without spaces.  Each extra backtick
+;; advances one layer, wrapping to layer one after the last configured layer.
+;; Customize the ordered list `touchtypst-symbol-alist' to set all layers.
+;; Each layer is an alist of (KEY . OUTPUT) pairs; add a third alist to
+;; make its symbols available after three backticks.
 
 ;;; Code:
 
@@ -103,17 +111,24 @@ Returns t on success, nil otherwise."
 
 ;;;; Symbol and modifier chords
 
-(defun touchtypst--read-chord (prompt prefix alist)
-  "Read a key with PROMPT and return its mapping in ALIST.
-For an unmapped key, insert PREFIX and either insert the printable key
-or let the command loop handle it."
-  (let ((key (read-key prompt t)))
+(defun touchtypst--read-chord (prompt prefix layers &optional repeat)
+  "Read a key with PROMPT and return its mapping in the first of LAYERS.
+When REPEAT is non-nil, each additional PREFIX key cycles to the next layer.
+For an unmapped key, insert all PREFIX keys and either insert the printable
+key or let the command loop handle it."
+  (let ((key (read-key prompt t))
+        (layer layers)
+        (count 1))
+    (while (and repeat (eq key prefix))
+      (setq layer (or (cdr layer) layers)
+            count (1+ count)
+            key (read-key prompt t)))
     ;; `read-key' can return C-g as an event, e.g. in a keyboard macro.
     (when (eq key ?\C-g)
       (keyboard-quit))
-    (or (alist-get key alist)
+    (or (alist-get key (car layer))
         (progn
-          (insert prefix)
+          (insert (make-string count prefix))
           (if (and (characterp key)
                    (not (eq (get-char-code-property key 'general-category) 'Cc)))
               (insert key)
@@ -121,33 +136,37 @@ or let the command loop handle it."
           nil))))
 
 (defcustom touchtypst-symbol-alist
-  '((?a . "alpha")    (?A . "Alpha")
-    (?b . "beta")     (?B . "Beta")
-    (?g . "gamma")    (?G . "Gamma")
-    (?d . "delta")    (?D . "Delta")
-    (?e . "epsilon")  (?E . "Epsilon")
-    (?z . "zeta")     (?Z . "Zeta")
-    (?h . "eta")      (?H . "Eta")
-    (?t . "theta")    (?T . "Theta")
-    (?k . "kappa")    (?K . "Kappa")
-    (?l . "lambda")   (?L . "Lambda")
-    (?m . "mu")       (?M . "Mu")
-    (?n . "nu")       (?N . "Nu")
-    (?x . "xi")       (?X . "Xi")
-    (?p . "pi")       (?P . "Pi")
-    (?r . "rho")      (?R . "Rho")
-    (?s . "sigma")    (?S . "Sigma")
-    (?u . "upsilon")  (?U . "Upsilon")
-    (?f . "phi")      (?F . "Phi")
-    (?c . "chi")      (?C . "Chi")
-    (?y . "psi")      (?Y . "Psi")
-    (?o . "omega")    (?O . "Omega")
-    (?i . "in")
-    (?8 . "infinity")
-    (?0 . "emptyset")
-    (?N . "NN") (?Z . "ZZ") (?Q . "QQ") (?R . "RR") (?C . "CC"))
-  "Alist mapping char (after `) to Typst symbol identifier."
-  :type '(alist :key-type character :value-type string)
+  '(((?a . "alpha")    (?A . "Alpha")
+     (?b . "beta")     (?B . "Beta")
+     (?g . "gamma")    (?G . "Gamma")
+     (?d . "delta")    (?D . "Delta")
+     (?e . "epsilon")  (?E . "Epsilon")
+     (?z . "zeta")     (?Z . "Zeta")
+     (?h . "eta")      (?H . "Eta")
+     (?t . "theta")    (?T . "Theta")
+     (?k . "kappa")    (?K . "Kappa")
+     (?l . "lambda")   (?L . "Lambda")
+     (?m . "mu")       (?M . "Mu")
+     (?n . "nu")       (?N . "Nu")
+     (?x . "xi")       (?X . "Xi")
+     (?p . "pi")       (?P . "Pi")
+     (?r . "rho")      (?R . "Rho")
+     (?s . "sigma")    (?S . "Sigma")
+     (?u . "upsilon")  (?U . "Upsilon")
+     (?f . "phi")      (?F . "Phi")
+     (?c . "chi")      (?C . "Chi")
+     (?y . "psi")      (?Y . "Psi")
+     (?o . "omega")    (?O . "Omega")
+     (?i . "in")
+     (?8 . "infinity")
+     (?0 . "emptyset")
+     (?Q . "QQ"))
+    ((?N . "NN") (?Z . "ZZ") (?Q . "QQ") (?R . "RR") (?C . "CC")))
+  "Ordered list of symbol layers, each an alist from keys to output strings.
+One backtick selects the first layer.  Each additional backtick advances
+one layer, cycling to the first after the last.  Only the selected layer
+is searched."
+  :type '(repeat (alist :key-type character :value-type string))
   :group 'touchtypst)
 
 (defun touchtypst--math-identifier-char (char)
@@ -175,11 +194,11 @@ or let the command loop handle it."
       (eq kind 'start))))
 
 (defun touchtypst-symbol-dispatch ()
-  "Read the next key; if it maps to a symbol in math, insert it."
+  "Read a symbol key in math, cycling layers on additional backticks."
   (interactive)
   (if (not (touchtypst-math-input-p))
       (insert ?`)
-    (when-let* ((sym (touchtypst--read-chord "Symbol `" ?` touchtypst-symbol-alist))
+    (when-let* ((sym (touchtypst--read-chord "Symbol `" ?` touchtypst-symbol-alist t))
                 ((> (length sym) 0)))
       (when (and (touchtypst--math-identifier-char (aref sym 0))
                  (touchtypst--math-identifier-before-p))
@@ -230,7 +249,7 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
    ((touchtypst-in-mat-row-p)
     (insert ?\;))
    (t
-    (when-let* ((fn (touchtypst--read-chord "Modifier ;" ?\; touchtypst-modifier-alist)))
+    (when-let* ((fn (touchtypst--read-chord "Modifier ;" ?\; (list touchtypst-modifier-alist))))
       (cond
        ((use-region-p)
         (touchtypst--wrap-region (region-beginning) (region-end) fn)

@@ -391,9 +391,41 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
 
 ;;;; Symbol dispatch ---------------------------------------------------------
 
+(ert-deftest touchtypst-test-symbol-key-layers ()
+  (dolist (case '(("$|$" "` N ` Z ` Q ` R ` C" "$Nu Zeta QQ Rho Chi$")
+                  ("$|$" "` ` N ` ` Z ` ` Q ` ` R ` ` C" "$NN ZZ QQ RR CC$")
+                  ("$|$" "` ` ` N ` ` ` ` Z" "$Nu ZZ$")
+                  ("$|$" "` ` a" "$``a$")
+                  ("plain |" "` ` N" "plain ``N")
+                  ("$\"|\"$" "` ` N" "$\"``N\"$")))
+    (pcase-let ((`(,initial ,keys ,expected) case))
+      (ert-info ((format "Typing %s in %S" keys initial))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd keys))
+            (should (equal (buffer-string) expected))))))))
+
+(ert-deftest touchtypst-test-symbol-key-custom-layers ()
+  (let ((touchtypst-symbol-alist '(((?q . "alpha"))
+                                  ((?q . "beta"))
+                                  ((?q . "gamma")))))
+    (save-window-excursion
+      (touchtypst-tests--with-buffer "$|$"
+        (switch-to-buffer (current-buffer))
+        (execute-kbd-macro (kbd "` q ` ` q ` ` ` q ` ` ` ` q ` ` N"))
+        (should (equal (buffer-string) "$alpha beta gamma alpha``N$")))))
+  (let ((touchtypst-symbol-alist '(((?q . "alpha")))))
+    (save-window-excursion
+      (touchtypst-tests--with-buffer "$|$"
+        (switch-to-buffer (current-buffer))
+        (execute-kbd-macro (kbd "` ` ` q"))
+        (should (equal (buffer-string) "$alpha$"))))))
+
 (ert-deftest touchtypst-test-symbol-key-spacing ()
   (dolist (case '(("$|$" "` a ` b" "$alpha beta|$")
                   ("$alpha|gamma$" "` b" "$alpha beta| gamma$")
+                  ("$alpha|gamma$" "` ` N" "$alpha NN| gamma$")
                   ("$alpha2|$" "` b" "$alpha2 beta|$")
                   ("$|2$" "` a" "$alpha| 2$")
                   ("$α|β$" "` a" "$α alpha| β$")
@@ -428,15 +460,16 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
         (save-window-excursion
           (touchtypst-tests--with-buffer "$x|y$"
             (switch-to-buffer (current-buffer))
-            (let ((touchtypst-symbol-alist `((?q . ,mapping))))
+            (let ((touchtypst-symbol-alist `(((?q . ,mapping)))))
               (execute-kbd-macro (kbd "` q")))
             (insert "|")
             (should (equal (buffer-string) expected))))))))
 
 (ert-deftest touchtypst-test-symbol-table-greek ()
-  (should (equal "alpha" (alist-get ?a touchtypst-symbol-alist)))
-  (should (equal "beta"  (alist-get ?b touchtypst-symbol-alist)))
-  (should (equal "infinity" (alist-get ?8 touchtypst-symbol-alist))))
+  (let ((first-layer (car touchtypst-symbol-alist)))
+    (should (equal "alpha" (alist-get ?a first-layer)))
+    (should (equal "beta"  (alist-get ?b first-layer)))
+    (should (equal "infinity" (alist-get ?8 first-layer)))))
 
 (ert-deftest touchtypst-test-modifier-table ()
   (should (equal "bar"   (alist-get ?b touchtypst-modifier-alist)))
@@ -447,8 +480,8 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
   (let ((map (make-sparse-keymap)))
     (dolist (key '("RET" "q" "C-c x"))
       (define-key map (kbd key) (lambda () (interactive) (insert "!"))))
-    (dolist (prefix '("`" ";"))
-      (dolist (case '(("RET" "$x%!|$") ("<left>" "$x|%$") ("q" "$x%q|$")
+    (dolist (prefix '("`" "``" "```" ";"))
+      (dolist (case '(("RET" "$x%!|$") ("<left>" nil) ("q" "$x%q|$")
                       ("é" "$x%é|$") ("C-c x" "$x%!|$") ("C-g" "$x|$")))
         (pcase-let ((`(,suffix ,expected) case))
           (ert-info ((format "%s %s" prefix suffix))
@@ -456,7 +489,7 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
               (touchtypst-tests--with-buffer "$x|$"
                 (switch-to-buffer (current-buffer))
                 (use-local-map map)
-                (let ((keys (kbd (concat prefix " " suffix))))
+                (let ((keys (vconcat prefix (kbd suffix))))
                   (if (equal suffix "C-g")
                       (should (eq (condition-case nil
                                     (execute-kbd-macro keys)
@@ -464,7 +497,11 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
                                   'quit))
                     (execute-kbd-macro keys)))
                 (insert "|")
-                (should (equal (buffer-string) (string-replace "%" prefix expected)))))))))))
+                (should (equal (buffer-string)
+                               (if expected
+                                   (string-replace "%" prefix expected)
+                                 (concat "$x" (substring prefix 0 -1)
+                                         "|" (substring prefix -1) "$"))))))))))))
 
 ;;;; End-to-end: snippet + nested smart-_ + tab navigation --------------------
 
