@@ -84,30 +84,47 @@ Triggered by typing the word and pressing TAB while in math context."
   :type '(alist :key-type string :value-type string)
   :group 'touchtypst)
 
-(defun touchtypst--snippet-before-point ()
-  "Return (BEG END TEMPLATE) for a whole math trigger ending at point."
+(defun touchtypst--snippet-before-point (snippets)
+  "Return the SNIPPETS entry for a whole math trigger ending at point."
   (when-let* ((node (touchtypst-previous-node))
               ((member (treesit-node-type node) '("ident" "letter")))
               ;; Field components and existing callees are not standalone triggers.
               ((not (member (treesit-node-type (treesit-node-parent node))
                             '("field" "call" "apply"))))
-              (template (cdr (assoc (treesit-node-text node t) touchtypst-snippet-alist)))
-              ((touchtypst-math-input-p)))
-    (list (treesit-node-start node) (treesit-node-end node) template)))
+              (entry (assoc (treesit-node-text node t) snippets))
+              ((cdr entry)))
+    entry))
+
+(defun touchtypst--tab-action (&optional direction)
+  "Return a snippet entry or a source stop position for DIRECTION.
+With nil, only look for a snippet.  With `next', prefer a snippet to a
+stop.  With `previous', only look for a stop."
+  (touchtypst--query
+   (lambda (snippets)
+     (when (touchtypst-math-input-p)
+       (if (eq direction 'previous)
+           (touchtypst--prev-stop-position)
+         (or (touchtypst--snippet-before-point snippets)
+             (and (eq direction 'next) (touchtypst--next-stop-position))))))
+   touchtypst-snippet-alist))
+
+(defun touchtypst--expand-snippet (snippet)
+  "Replace the trigger ending at point with SNIPPET's template."
+  (let* ((template (cdr snippet))
+         (beg (- (point) (length (car snippet)))))
+    (delete-region beg (point))
+    (insert template)
+    ;; Resolve the fragment again: its size and its tree may both have changed.
+    (when-let* ((stop (touchtypst--query #'touchtypst--first-template-stop (- (point) beg))))
+      (goto-char stop)))
+  t)
 
 (defun touchtypst-try-expand-snippet ()
   "If the word before point is a math snippet trigger, expand it.
 Move point to the first template slot, or leave it after the inserted text.
 Returns t on success, nil otherwise."
-  (when-let* ((info (touchtypst--snippet-before-point)))
-    (pcase-let ((`(,beg ,end ,template) info))
-      (delete-region beg end)
-      (insert template)
-      (touchtypst--refresh-parse)
-      (when-let* ((block (touchtypst-math-block beg))
-                  (stop (car (touchtypst--collect-stops block beg (point)))))
-        (goto-char stop)))
-    t))
+  (when-let* ((snippet (touchtypst--tab-action)))
+    (touchtypst--expand-snippet snippet)))
 
 ;;;; Symbol and modifier chords
 
@@ -196,17 +213,18 @@ is searched."
 (defun touchtypst-symbol-dispatch ()
   "Read a symbol key in math, cycling layers on additional backticks."
   (interactive)
-  (if (not (touchtypst-math-input-p))
+  (if (not (touchtypst--query #'touchtypst-math-input-p))
       (insert ?`)
     (when-let* ((sym (touchtypst--read-chord "Symbol `" ?` touchtypst-symbol-alist t))
                 ((> (length sym) 0)))
       (when (and (touchtypst--math-identifier-char (aref sym 0))
-                 (touchtypst--math-identifier-before-p))
+                 (touchtypst--query #'touchtypst--math-identifier-before-p))
         (insert " "))
       (insert sym)
       ;; Leave point before the separator so a suffix can still attach.
-      (when (and (touchtypst--math-identifier-char (char-after))
-                 (touchtypst--math-identifier-before-p))
+      (when (touchtypst--query
+             (lambda () (and (touchtypst--math-identifier-char (char-after))
+                             (touchtypst--math-identifier-before-p))))
         (save-excursion (insert " "))))))
 
 (defcustom touchtypst-modifier-alist
@@ -243,38 +261,32 @@ Point ends up after the closing paren."
   "Read next key; wrap previous node (or region) with the mapped function.
 Falls through to literal `;' insertion outside math or inside `mat(...)'."
   (interactive)
-  (cond
-   ((not (touchtypst-math-input-p))
-    (insert ?\;))
-   ((touchtypst-in-mat-row-p)
-    (insert ?\;))
-   (t
+  (if (not (touchtypst--query (lambda () (and (touchtypst-math-input-p)
+                                              (not (touchtypst-in-mat-row-p))))))
+      (insert ?\;)
     (when-let* ((fn (touchtypst--read-chord "Modifier ;" ?\; (list touchtypst-modifier-alist))))
-      (cond
-       ((use-region-p)
-        (touchtypst--wrap-region (region-beginning) (region-end) fn)
-        (deactivate-mark))
-       (t
-        (let ((bounds (touchtypst--previous-node-bounds)))
-          (if bounds
-              (touchtypst--wrap-region (car bounds) (cdr bounds) fn)
-            ;; No previous node: insert `fn()' and place point inside.
-            (insert fn "()")
-            (backward-char 1)))))))))
+      (if (use-region-p)
+          (progn
+            (touchtypst--wrap-region (region-beginning) (region-end) fn)
+            (deactivate-mark))
+        (if-let* ((beg (touchtypst--query #'touchtypst--previous-operand-start)))
+            (touchtypst--wrap-region beg (point) fn)
+          (insert fn "()")
+          (backward-char 1))))))
 
 ;;;; Smart insertion
 
 (defun touchtypst-smart-_ ()
   "Insert `_()' in math with point inside; bare `_' otherwise."
   (interactive)
-  (if (touchtypst-math-input-p)
+  (if (touchtypst--query #'touchtypst-math-input-p)
       (progn (insert "_()") (backward-char 1))
     (insert ?_)))
 
 (defun touchtypst-smart-^ ()
   "Insert `^()' in math with point inside; bare `^' otherwise."
   (interactive)
-  (if (touchtypst-math-input-p)
+  (if (touchtypst--query #'touchtypst-math-input-p)
       (progn (insert "^()") (backward-char 1))
     (insert ?^)))
 
@@ -289,7 +301,7 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 (defun touchtypst-smart-$ ()
   "Pair or exit an equation, or insert a literal dollar otherwise."
   (interactive)
-  (let ((action (touchtypst--smart-dollar-action)))
+  (let ((action (touchtypst--query #'touchtypst--smart-dollar-action)))
     (cond ((eq action 'open) (insert "$$") (backward-char 1))
           (action (goto-char action))
           (t (insert ?$)))))
@@ -297,7 +309,7 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 (defun touchtypst-smart-SPC ()
   "Pad an empty equation to make it display math, or insert one space."
   (interactive)
-  (if (touchtypst--empty-math-p)
+  (if (touchtypst--query #'touchtypst--empty-math-p)
       (progn (insert "  ") (backward-char 1))
     (insert ?\s)))
 
@@ -306,40 +318,39 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
 (defun touchtypst-tab-or-expand ()
   "Expand a snippet or jump to the next stop in math."
   (interactive)
-  (or (touchtypst-try-expand-snippet)
-      (when (touchtypst-math-input-p)
-        (touchtypst-next-stop))))
+  (when-let* ((action (touchtypst--tab-action 'next)))
+    (if (consp action) (touchtypst--expand-snippet action)
+      (goto-char action) t)))
 
 (defun touchtypst-shift-tab-fallthrough ()
   "Jump to the previous stop in math."
   (interactive)
-  (when (touchtypst-math-input-p)
-    (touchtypst-prev-stop)))
+  (when-let* ((stop (touchtypst--tab-action 'previous)))
+    (goto-char stop) t))
 
 (defun touchtypst--math-input-filter (command)
   "Return COMMAND when point is in formula syntax."
-  (when (touchtypst-math-input-p)
+  (when (touchtypst--query #'touchtypst-math-input-p)
     command))
 
 (defun touchtypst--dollar-filter (command)
   "Return COMMAND when dollar can open or exit an equation."
-  (when (touchtypst--smart-dollar-action)
+  (when (touchtypst--query #'touchtypst--smart-dollar-action)
     command))
 
 (defun touchtypst--spc-filter (command)
   "Return COMMAND when SPC can pad an empty equation."
-  (when (touchtypst--empty-math-p)
+  (when (touchtypst--query #'touchtypst--empty-math-p)
     command))
 
 (defun touchtypst--tab-filter (command)
   "Return COMMAND when Tab can expand a snippet or move to a stop."
-  (when (or (touchtypst--snippet-before-point)
-            (and (touchtypst-math-input-p) (touchtypst--next-stop-position)))
+  (when (touchtypst--tab-action 'next)
     command))
 
 (defun touchtypst--backtab-filter (command)
   "Return COMMAND when Shift-Tab can move to a previous stop."
-  (when (and (touchtypst-math-input-p) (touchtypst--prev-stop-position))
+  (when (touchtypst--tab-action 'previous)
     command))
 
 (defvar touchtypst-mode-map

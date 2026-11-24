@@ -12,9 +12,40 @@
 
 ;;;; Math context
 
+(defvar-local touchtypst--context-function nil
+  "Optional function for running syntax queries on an embedded Typst fragment.
+Called as (POS OTHER-END RUN) in the source buffer.  OTHER-END is the
+mark of an active region, or nil.  Return nil unless POS and any OTHER-END
+are editable insertion positions in the same fragment.  Otherwise call
+RUN with the Typst parser, at the position corresponding to POS in a
+buffer whose accessible text is the verbatim fragment.  The fragment's
+interior must be editable throughout.  Return its result
+without changing the source buffer, its point, or its restriction.
+When nil, use the current buffer and its existing Typst parser in place.")
+
+(defvar touchtypst--query-context nil
+  "Dynamically bound (BUFFER . PARSER) for the current syntax query.")
+
 (defun touchtypst--parser ()
-  "Return the buffer's existing Typst parser, or nil."
-  (cl-find 'typst (treesit-parser-list) :key #'treesit-parser-language))
+  "Return the selected Typst parser or the buffer's existing one, if any."
+  (if (eq (current-buffer) (car touchtypst--query-context))
+      (cdr touchtypst--query-context)
+    (cl-find 'typst (treesit-parser-list) :key #'treesit-parser-language)))
+
+(defun touchtypst--query (function &rest args)
+  "Query Typst syntax at point with FUNCTION and source-buffer ARGS.
+FUNCTION is read-only.  An integer result is a character position and is
+translated back to the source buffer; other facts are returned unchanged.
+Never return a tree node."
+  (let* ((pos (point))
+         (run (lambda (parser)
+                (let* ((touchtypst--query-context (cons (current-buffer) parser))
+                       (offset (- pos (point)))
+                       (result (apply function args)))
+                  (if (integerp result) (+ result offset) result)))))
+    (if touchtypst--context-function
+        (funcall touchtypst--context-function pos (and (use-region-p) (mark)) run)
+      (funcall run (touchtypst--parser)))))
 
 (defun touchtypst--node-at (pos)
   "Return the Typst leaf at POS, or nil if there is no Typst parser."
@@ -173,8 +204,8 @@ Returns nil if no such node exists."
         (when (and node (= (treesit-node-end node) p))
           node)))))
 
-(defun touchtypst--previous-node-bounds ()
-  "Return (BEG . END) for one math operand ending at point, or nil."
+(defun touchtypst--previous-operand-start ()
+  "Return the start of one math operand ending at point, or nil."
   (when-let* ((node (touchtypst-previous-node)))
     ;; Include a field's receiver and a code expression's `#'.  A code
     ;; call can have a separate argument group between the leaf and `code'.
@@ -183,12 +214,7 @@ Returns nil if no such node exists."
                         (= (treesit-node-end parent) (point))
                         (member (treesit-node-type parent) '("field" "call" "code")))
              do (setq node parent))
-    (cons (treesit-node-start node) (treesit-node-end node))))
-
-(defun touchtypst--refresh-parse ()
-  "Force pending edits to be parsed before looking up new tab stops."
-  (when-let* ((parser (touchtypst--parser)))
-    (treesit-parser-root-node parser)))
+    (treesit-node-start node)))
 
 ;;;; Tab stops
 
@@ -255,6 +281,13 @@ If BEG and END are given, only collect stops from nodes within that range."
       (walk node))
     (sort stops #'<)))
 
+(defun touchtypst--first-template-stop (width)
+  "Return the first stop in WIDTH characters of inserted text before point."
+  (let ((beg (- (point) width)))
+    (when-let* (((<= (point-min) beg)) ; The insertion can change fragment boundaries.
+                (block (touchtypst-math-block beg)))
+      (car (touchtypst--collect-stops block beg (point))))))
+
 (defun touchtypst--stops-in-block ()
   "Return sorted list of stop positions in the math block at point, or nil."
   (when-let* ((block (touchtypst-math-block)))
@@ -272,13 +305,13 @@ If BEG and END are given, only collect stops from nodes within that range."
   "Move point to the next tab stop in the current math block.
 Returns t if a stop was found, nil otherwise (caller should fall through)."
   (interactive)
-  (let ((next (touchtypst--next-stop-position)))
+  (let ((next (touchtypst--query #'touchtypst--next-stop-position)))
     (when next (goto-char next) t)))
 
 (defun touchtypst-prev-stop ()
   "Move point to the previous tab stop in the current math block."
   (interactive)
-  (let ((prev (touchtypst--prev-stop-position)))
+  (let ((prev (touchtypst--query #'touchtypst--prev-stop-position)))
     (when prev (goto-char prev) t)))
 
 (provide 'touchtypst-parse)
