@@ -115,6 +115,28 @@ Returns nil at the exact opening or closing `$' boundary."
                  while node
                  thereis (touchtypst--literal-node-at-p node pos)))))
 
+(defun touchtypst--unfinished-math-p ()
+  "Return non-nil if the local parse error shows an open equation at point."
+  (let ((left (save-excursion
+                ;; Recovery nodes can end before trailing whitespace.
+                (skip-chars-backward " \t\r\n")
+                (when (> (point) (point-min))
+                  (touchtypst--node-at (1- (point)))))))
+    (cl-loop for child = left then parent
+             for parent = (and child (treesit-node-parent child))
+             while (and parent (not (equal (treesit-node-type child) "math")))
+             when (equal (treesit-node-type parent) "ERROR")
+             return
+             ;; The opener is a direct token in the error, not a delimiter
+             ;; inside a complete equation or part of a later expression.
+             (cl-loop for token = child then (treesit-node-prev-sibling token)
+                      for type = (treesit-node-type token)
+                      while token
+                      when (member type '("$" "#" "math"))
+                      return (and (equal type "$")
+                                  (not (treesit-node-check token 'missing))
+                                  (<= (treesit-node-end token) (point)))))))
+
 (defun touchtypst--call-callee-text (call-node)
   "Return text of CALL-NODE's callee child, or nil."
   (when-let* ((first (car (treesit-node-children call-node))))

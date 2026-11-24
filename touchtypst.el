@@ -260,11 +260,12 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
     (insert ?^)))
 
 (defun touchtypst--smart-dollar-action ()
-  "Return `open', an equation exit position, or nil for literal dollar."
+  "Return `open', an equation exit position, or nil to fall through."
   (unless (touchtypst--literal-dollar-p)
     (if-let* ((math (touchtypst-math-block)))
         (touchtypst--math-exit-position math)
-      'open)))
+      (unless (touchtypst--unfinished-math-p)
+        'open))))
 
 (defun touchtypst-smart-$ ()
   "Pair or exit an equation, or insert a literal dollar otherwise."
