@@ -167,30 +167,38 @@ Returns nil if no such node exists."
 (defun touchtypst--slot-stops (node has-callee)
   "Enumerate stop positions for slots inside NODE.
 HAS-CALLEE means the first child is the callee (skip it)."
-  (let ((children (treesit-node-children node))
+  (let ((apply-p (equal (treesit-node-type node) "apply"))
+        (children (treesit-node-children node))
         stops
         prev-delim-end
-        slot-formula)
+        slot-start)
     (when has-callee (pop children))
+    ;; An apply has one formula, not one node per slot.  Look at its
+    ;; immediate children only: nested expressions and literals stay intact.
+    (when apply-p
+      (setq children (cl-loop for child in children
+                              if (equal (treesit-node-type child) "formula")
+                              append (treesit-node-children child)
+                              else collect child)))
     (dolist (child children)
       (let ((type (treesit-node-type child)))
         (cond
          ((and (null prev-delim-end) (member type '("(" "[")))
           (setq prev-delim-end (treesit-node-end child)
-                slot-formula nil))
-         ((member type '("," ";"))
-          (push (or (and slot-formula (treesit-node-start slot-formula))
-                    prev-delim-end)
-                stops)
+                slot-start nil))
+         ((or (member type '("," ";"))
+              (and apply-p (equal type "symbol")
+                   (equal (treesit-node-text child t) ",")))
+          (push (or slot-start prev-delim-end) stops)
           (setq prev-delim-end (treesit-node-end child)
-                slot-formula nil))
+                slot-start nil))
          ((member type '(")" "]"))
-          (push (or (and slot-formula (treesit-node-start slot-formula))
-                    prev-delim-end)
-                stops)
+          (push (or slot-start prev-delim-end) stops)
           (setq prev-delim-end nil))
-         ((equal type "formula")
-          (setq slot-formula child)))))
+         ((and (null slot-start)
+               (or (member type '("formula" "tagged"))
+                   (and apply-p (not (equal type "comment")))))
+          (setq slot-start (treesit-node-start child))))))
     (nreverse stops)))
 
 (defun touchtypst--node-stops (node)

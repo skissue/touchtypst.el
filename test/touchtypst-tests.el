@@ -221,11 +221,14 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
 (ert-deftest touchtypst-test-tab-snippet-uses-only-template-slots ()
   (let ((touchtypst-snippet-alist '(("aa" . "alpha")
                                    ("pad" . " alpha")
-                                   ("fr" . "frac(, )"))))
+                                   ("fr" . "frac(, )")
+                                   ("fx" . "f(, y)"))))
     (dolist (case '(("$aa|$" . "$alpha|$")
                     ("$aa| + frac(x,y)$" . "$alpha| + frac(x,y)$")
                     ("$frac(pad|,y)$" . "$frac( alpha|,y)$")
                     ("$frac(fr|,y)$" . "$frac(frac(|, ),y)$")
+                    ("$f(x, aa|, y)$" . "$f(x, alpha|, y)$")
+                    ("$vec(a,  value: fx|)$" . "$vec(a,  value: f(|, y))$")
                     ("$aaa| + frac(x,y)$" . "$aaa + frac(|x,y)$")))
       (ert-info ((format "TAB in %S" (car case)))
         (save-window-excursion
@@ -401,6 +404,28 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
 ;;;; End-to-end: snippet + nested smart-_ + tab navigation --------------------
 
 (defvar touchtypst-tests--tab-mode nil)
+
+(ert-deftest touchtypst-test-tab-math-argument-slots ()
+  (dolist (stops '(("$f(|x, y)$" "$f(x, |y)$")
+                   ("$vec(|a,  delim: \"[\")$" "$vec(a,  |delim: \"[\")$")
+                   ("$f(|, x,, )$" "$f(, |x,, )$" "$f(, x,|, )$" "$f(, x,,| )$")
+                   ("$f(|x, (y,z), \"a,b\", \\,, q)$"
+                    "$f(x, |(y,z), \"a,b\", \\,, q)$"
+                    "$f(x, (|y,z), \"a,b\", \\,, q)$"
+                    "$f(x, (y,z), |\"a,b\", \\,, q)$"
+                    "$f(x, (y,z), \"a,b\", |\\,, q)$"
+                    "$f(x, (y,z), \"a,b\", \\,, |q)$")))
+    (dolist (direction `(("TAB" ,@stops) ("<backtab>" ,@(reverse stops))))
+      (pcase-let ((`(,key ,initial . ,expected-stops) direction))
+        (ert-info ((format "%s in %S" key initial))
+          (save-window-excursion
+            (touchtypst-tests--with-buffer initial
+              (switch-to-buffer (current-buffer))
+              (dolist (expected expected-stops)
+                (execute-kbd-macro (kbd key))
+                (should (equal (concat (buffer-substring-no-properties (point-min) (point))
+                                       "|" (buffer-substring-no-properties (point) (point-max)))
+                               expected))))))))))
 
 (ert-deftest touchtypst-test-math-keys-with-foreign-parser-first ()
   (skip-unless (treesit-language-available-p 'json))
