@@ -89,15 +89,17 @@ Triggered by typing the word and pressing TAB while in math context."
 
 (defun touchtypst-try-expand-snippet ()
   "If the word before point is a math snippet trigger, expand it.
+Move point to the first template slot, or leave it after the inserted text.
 Returns t on success, nil otherwise."
   (when-let* ((info (touchtypst--snippet-before-point))
               ((touchtypst-math-input-p)))
-    (delete-region (nth 0 info) (nth 1 info))
-    (insert (nth 2 info))
-    ;; Start the search at the beginning of the inserted text.
-    (goto-char (nth 0 info))
-    (touchtypst--refresh-parse)
-    (touchtypst-next-stop)
+    (pcase-let ((`(,beg ,end ,template) info))
+      (delete-region beg end)
+      (insert template)
+      (touchtypst--refresh-parse)
+      (when-let* ((block (touchtypst-math-block beg))
+                  (stop (car (touchtypst--collect-stops block beg (point)))))
+        (goto-char stop)))
     t))
 
 ;;;; Symbol and modifier chords

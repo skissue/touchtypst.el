@@ -199,14 +199,19 @@ HAS-CALLEE means the first child is the callee (skip it)."
     ((or "call" "apply") (touchtypst--slot-stops node t))
     ("group"             (touchtypst--slot-stops node nil))))
 
-(defun touchtypst--collect-stops (node)
-  "Recursively collect all stops in subtree rooted at NODE, sorted ascending."
+(defun touchtypst--collect-stops (node &optional beg end)
+  "Recursively collect stops in subtree rooted at NODE, sorted ascending.
+If BEG and END are given, only collect stops from nodes within that range."
   (let (stops)
     (cl-labels ((walk (n)
-                  (let ((own (touchtypst--node-stops n)))
-                    (when own (setq stops (nconc own stops))))
-                  (dolist (c (treesit-node-children n))
-                    (walk c))))
+                  (when (or (not beg)
+                            (and (< (treesit-node-start n) end)
+                                 (< beg (treesit-node-end n))))
+                    (when (or (not beg)
+                              (<= beg (treesit-node-start n) (treesit-node-end n) end))
+                      (setq stops (nconc (touchtypst--node-stops n) stops)))
+                    (dolist (c (treesit-node-children n))
+                      (walk c)))))
       (walk node))
     (sort stops #'<)))
 

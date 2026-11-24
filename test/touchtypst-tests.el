@@ -193,6 +193,23 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
   (touchtypst-tests--with-buffer "$ |$"
     (should-not (touchtypst-try-expand-snippet))))
 
+(ert-deftest touchtypst-test-tab-snippet-uses-only-template-slots ()
+  (let ((touchtypst-snippet-alist '(("aa" . "alpha")
+                                   ("pad" . " alpha")
+                                   ("fr" . "frac(, )"))))
+    (dolist (case '(("$aa|$" . "$alpha|$")
+                    ("$aa| + frac(x,y)$" . "$alpha| + frac(x,y)$")
+                    ("$frac(pad|,y)$" . "$frac( alpha|,y)$")
+                    ("$frac(fr|,y)$" . "$frac(frac(|, ),y)$")
+                    ("$aaa| + frac(x,y)$" . "$aaa + frac(|x,y)$")))
+      (ert-info ((format "TAB in %S" (car case)))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer (car case)
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd "TAB"))
+            (insert "|")
+            (should (equal (buffer-string) (cdr case)))))))))
+
 ;;;; Modifier wrapping --------------------------------------------------------
 
 (ert-deftest touchtypst-test-wrap-letter-bar ()
