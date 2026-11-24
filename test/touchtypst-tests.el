@@ -264,6 +264,23 @@ removed).  Enables `touchtypst-mode' without invoking a Typst major mode."
       (touchtypst--wrap-region beg end "bar")
       (should (string= "$ bar(x + y)$" (buffer-string))))))
 
+(ert-deftest touchtypst-test-modifier-wraps-one-operand ()
+  (dolist (case '(("$epsilon.alt|$" "$bar(epsilon.alt)|$")
+                  ("$#text(\"hello\")|$" "$bar(#text(\"hello\"))|$")
+                  ("$x + y|$" "$x + bar(y)|$")
+                  ("$x + y|$" "$bar(x + y)|$" t)))
+    (pcase-let ((`(,initial ,expected . ,select) case))
+      (ert-info ((format ";b in %S%s" initial (if select " with region" "")))
+        (save-window-excursion
+          (touchtypst-tests--with-buffer initial
+            (switch-to-buffer (current-buffer))
+            (let ((transient-mark-mode t))
+              (when select
+                (push-mark (1+ (point-min)) t t))
+              (execute-kbd-macro (kbd "; b")))
+            (insert "|")
+            (should (equal (buffer-string) expected))))))))
+
 ;;;; Smart insertions ---------------------------------------------------------
 
 (ert-deftest touchtypst-test-smart-_-in-math ()

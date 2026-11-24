@@ -149,8 +149,15 @@ Returns nil if no such node exists."
           node)))))
 
 (defun touchtypst--previous-node-bounds ()
-  "Return (BEG . END) for the expression ending at point, or nil."
+  "Return (BEG . END) for one math operand ending at point, or nil."
   (when-let* ((node (touchtypst-previous-node)))
+    ;; Include a field's receiver and a code expression's `#'.  A code
+    ;; call can have a separate argument group between the leaf and `code'.
+    (cl-loop for parent = (treesit-node-parent node)
+             while (and parent
+                        (= (treesit-node-end parent) (point))
+                        (member (treesit-node-type parent) '("field" "call" "code")))
+             do (setq node parent))
     (cons (treesit-node-start node) (treesit-node-end node))))
 
 (defun touchtypst--refresh-parse ()
