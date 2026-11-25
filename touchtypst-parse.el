@@ -21,7 +21,14 @@ RUN with the Typst parser, at the position corresponding to POS in a
 buffer whose accessible text is the verbatim fragment.  The fragment's
 interior must be editable throughout.  Return its result
 without changing the source buffer, its point, or its restriction.
-When nil, use the current buffer and its existing Typst parser in place.")
+When neither this nor `touchtypst--context-functions' is set, use the
+current buffer and its existing Typst parser in place.")
+
+(defvar touchtypst--context-functions nil
+  "Hook of fragment providers tried before `touchtypst--context-function'.
+Each takes the same arguments as that function.  The first provider to
+call RUN owns the query.  When any provider is configured, do not fall
+back to treating the host buffer as Typst.")
 
 (defvar touchtypst--query-context nil
   "Dynamically bound (BUFFER . PARSER) for the current syntax query.")
@@ -43,8 +50,15 @@ Never return a tree node."
                        (offset (- pos (point)))
                        (result (apply function args)))
                   (if (integerp result) (+ result offset) result)))))
-    (if touchtypst--context-function
-        (funcall touchtypst--context-function pos (and (use-region-p) (mark)) run)
+    (if (or touchtypst--context-functions touchtypst--context-function)
+        (let* ((other-end (and (use-region-p) (mark)))
+               ;; A provider that ran the query can legitimately answer nil.
+               (claimed (run-hook-with-args-until-success
+                         'touchtypst--context-functions pos other-end
+                         (lambda (parser) (list (funcall run parser))))))
+          (if claimed (car claimed)
+            (when touchtypst--context-function
+              (funcall touchtypst--context-function pos other-end run))))
       (funcall run (touchtypst--parser)))))
 
 (defun touchtypst--node-at (pos)

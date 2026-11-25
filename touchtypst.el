@@ -353,27 +353,31 @@ Falls through to literal `;' insertion outside math or inside `mat(...)'."
   (when (touchtypst--tab-action 'previous)
     command))
 
-(defvar touchtypst-mode-map
-  (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "`")
-                '(menu-item "" touchtypst-symbol-dispatch :filter touchtypst--math-input-filter))
-    (define-key m (kbd ";")
-                '(menu-item "" touchtypst-modifier-dispatch :filter touchtypst--math-input-filter))
-    (define-key m (kbd "_")
-                '(menu-item "" touchtypst-smart-_ :filter touchtypst--math-input-filter))
-    (define-key m (kbd "^")
-                '(menu-item "" touchtypst-smart-^ :filter touchtypst--math-input-filter))
-    (define-key m (kbd "$")
-                '(menu-item "" touchtypst-smart-$ :filter touchtypst--dollar-filter))
-    (define-key m (kbd "SPC")
-                '(menu-item "" touchtypst-smart-SPC :filter touchtypst--spc-filter))
-    ;; Let Emacs translate <tab> to TAB and S-<tab> to <backtab> so that
-    ;; higher-priority bindings for the translated keys still win.
-    (define-key m (kbd "TAB")
-                '(menu-item "" touchtypst-tab-or-expand :filter touchtypst--tab-filter))
-    (define-key m (kbd "<backtab>")
-                '(menu-item "" touchtypst-shift-tab-fallthrough :filter touchtypst--backtab-filter))
-    m)
+(defconst touchtypst--bindings
+  '(("`" touchtypst-symbol-dispatch touchtypst--math-input-filter)
+    (";" touchtypst-modifier-dispatch touchtypst--math-input-filter)
+    ("_" touchtypst-smart-_ touchtypst--math-input-filter)
+    ("^" touchtypst-smart-^ touchtypst--math-input-filter)
+    ("$" touchtypst-smart-$ touchtypst--dollar-filter)
+    ("SPC" touchtypst-smart-SPC touchtypst--spc-filter)
+    ;; Let Emacs translate <tab> and S-<tab> so higher-priority bindings win.
+    ("TAB" touchtypst-tab-or-expand touchtypst--tab-filter)
+    ("<backtab>" touchtypst-shift-tab-fallthrough touchtypst--backtab-filter)))
+
+(defun touchtypst--make-keymap (bindings &optional provider)
+  "Build a keymap from BINDINGS, optionally limiting its filters to PROVIDER."
+  (let ((map (make-sparse-keymap)))
+    (pcase-dolist (`(,key ,command ,filter) bindings)
+      (keymap-set map key
+                  `(menu-item "" ,command :filter
+                              ,(if (not provider) filter
+                                 (lambda (cmd)
+                                   (let ((touchtypst--context-functions nil)
+                                         (touchtypst--context-function provider))
+                                     (funcall filter cmd)))))))
+    map))
+
+(defvar touchtypst-mode-map (touchtypst--make-keymap touchtypst--bindings)
   "Keymap for `touchtypst-mode'.")
 
 ;;;###autoload
