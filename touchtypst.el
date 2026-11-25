@@ -34,6 +34,10 @@
 ;;
 ;;   (add-hook 'typst-ts-mode-hook #'touchtypst-mode)
 ;;
+;; For inline Typst export snippets and export blocks in Org, use:
+;;
+;;   (add-hook 'org-mode-hook #'org-touchtypst-mode)
+;;
 ;; Formula input and tab stops are inactive in literal text and embedded
 ;; code.  Dollar and space handle equation delimiters separately.
 ;;
