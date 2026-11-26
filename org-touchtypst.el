@@ -1,7 +1,16 @@
 ;;; org-touchtypst.el --- TouchTypst input in Org export fragments -*- lexical-binding: t -*-
 
+;; Author: Ad <me@skissue.xyz>
+;; Maintainer: Ad <me@skissue.xyz>
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1") (org "9.6") (touchtypst "0.1.0"))
+;; Homepage: https://github.com/skissue/touchtypst.el
+;; Keywords: convenience, text
+
 ;;; Commentary:
 
+;; Requires Emacs with Tree-sitter support and the Typst grammar installed.
+;;
 ;; Enable with (add-hook 'org-mode-hook #'org-touchtypst-mode).
 ;; Type Typst math directly in @@typst:$...$@@ or in a #+begin_export
 ;; typst block.  As in a .typ file, the body is markup until you enter
